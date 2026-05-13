@@ -53,10 +53,12 @@ async function newContext (browser) {
     }
   }
 
-  // Proxy residencial (Webshare.io u otro) — evita bloqueo Cloudflare en datacenter
-  if (process.env.PROXY_SERVER) {
-    ctxOpts.proxy = { server: process.env.PROXY_SERVER }
-    logger.info('Proxy configurado', { server: process.env.PROXY_SERVER })
+  // Proxy via bridge local (HTTP sin auth → SOCKS5 con auth en Webshare)
+  const { getLocalProxyUrl } = require('../proxy/bridge')
+  const proxyUrl = getLocalProxyUrl() || process.env.PROXY_SERVER
+  if (proxyUrl) {
+    ctxOpts.proxy = { server: proxyUrl }
+    logger.info('Proxy configurado', { server: proxyUrl })
   }
 
   return browser.newContext(ctxOpts)

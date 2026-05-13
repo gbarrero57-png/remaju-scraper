@@ -10,6 +10,10 @@ const { closeBrowser } = require('./browser/manager')
 
 // Inicializar schema al arrancar
 initDb()
+
+// Iniciar proxy bridge si hay proxy configurado
+const { startProxyBridge } = require('./proxy/bridge')
+startProxyBridge().catch(err => console.warn('Proxy bridge error:', err.message))
 const logger         = require('./utils/logger')
 const { createBot }  = require('./bot/index')
 
