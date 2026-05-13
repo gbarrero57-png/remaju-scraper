@@ -113,6 +113,36 @@ app.get('/auctions', (req, res) => {
   }
 })
 
+// ── GET /diagnose ──────────────────────────────────────
+app.get('/diagnose', async (req, res) => {
+  const { getBrowser, newContext } = require('./browser/manager')
+  let browser, context, page
+  try {
+    browser = await getBrowser()
+    context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      viewport: { width: 1366, height: 768 }, locale: 'es-PE'
+    })
+    page = await context.newPage()
+    await page.goto('https://remaju.pj.gob.pe/remaju/pages/publico/remateExterno.xhtml', { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await page.waitForTimeout(3000)
+    const info = await page.evaluate(() => ({
+      title: document.title,
+      url: location.href,
+      bodyText: document.body.innerText?.substring(0, 500),
+      datagridCount: document.querySelectorAll('.ui-datagrid-column').length,
+      formCount: document.querySelectorAll('form').length,
+      selectCount: document.querySelectorAll('select').length,
+      allClasses: [...new Set(Array.from(document.querySelectorAll('[class]')).flatMap(el => el.className.split(' ')).filter(Boolean))].slice(0, 30)
+    }))
+    await context.close()
+    res.json({ ok: true, ...info })
+  } catch (err) {
+    if (context) await context.close().catch(() => {})
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
 // ── Función principal de scraping ─────────────────────
 async function runScraping (runId, source, filters, mode) {
   const startedAt = new Date().toISOString()
