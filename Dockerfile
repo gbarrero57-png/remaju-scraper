@@ -17,9 +17,11 @@ RUN apt-get update && apt-get install -y \
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-ENV PROXY_SERVER=http://p.webshare.io:3128
+ENV PROXY_SERVER=http://p.webshare.io:80
 ENV PROXY_USERNAME=mtjgphlw-PE-1
 ENV PROXY_PASSWORD=es665h4w7cq9
+# IPs de p.webshare.io (pre-resueltas para bypass DNS interno del VPS)
+ENV PROXY_HOSTS="177.54.156.39 103.88.235.135 177.54.152.227"
 
 WORKDIR /app
 
@@ -33,4 +35,4 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s \
   CMD node -e "require('http').get('http://localhost:3001/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"
 
-CMD ["node", "src/server.js"]
+CMD ["sh", "-c", "echo '177.54.156.39 p.webshare.io' >> /etc/hosts && node src/server.js"]
