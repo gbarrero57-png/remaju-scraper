@@ -21,7 +21,8 @@ COPY package.json .
 RUN npm install --omit=dev
 
 COPY src/ ./src/
-RUN node -e "const s=require('fs').readFileSync('src/server.js','utf8'); if(s.includes('status = \"active\"')) process.exit(1)"
+# Cache bust: v20260513-proxy
+RUN node -e "const s=require('fs').readFileSync('src/server.js','utf8'); if(s.includes('status = \"active\"')) process.exit(1); if(!s.includes('PROXY_SERVER')) { console.error('FATAL: proxy support missing'); process.exit(1); }"
 
 EXPOSE 3001
 
