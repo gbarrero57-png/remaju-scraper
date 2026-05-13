@@ -130,14 +130,21 @@ app.get('/proxy-test', async (req, res) => {
     results.direct_ip = r.data.ip
   } catch (e) { results.direct_error = e.message }
 
-  // Test con proxy via axios
+  // Test con proxy via axios (soporta http y socks5)
   if (proxyServer) {
     try {
       const url = new URL(proxyServer)
-      const r = await axios.get('https://api.ipify.org/?format=json', {
-        timeout: 10000,
-        proxy: { host: url.hostname, port: parseInt(url.port), auth: { username: user, password: pass } }
-      })
+      const isSocks = proxyServer.startsWith('socks')
+      let axiosConfig = { timeout: 10000 }
+      if (isSocks) {
+        const { SocksProxyAgent } = require('socks-proxy-agent')
+        const agent = new SocksProxyAgent(`socks5://${user}:${pass}@${url.hostname}:${url.port}`)
+        axiosConfig.httpsAgent = agent
+        axiosConfig.httpAgent  = agent
+      } else {
+        axiosConfig.proxy = { host: url.hostname, port: parseInt(url.port), auth: { username: user, password: pass } }
+      }
+      const r = await axios.get('https://api.ipify.org/?format=json', axiosConfig)
       results.proxy_ip = r.data.ip
     } catch (e) { results.proxy_error = e.message }
   }
