@@ -364,41 +364,45 @@ function createBot () {
   })
 
   bot.action(/^tipo:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery()
     const tipo = ctx.match[1]
-    const sb   = getSupabase()
-    const { data: user } = await sb.from('remaju_users').select('id').eq('telegram_id', ctx.from.id).single()
-    if (!user) return ctx.answerCbQuery('No registrado')
+    try {
+      const sb   = getSupabase()
+      const { data: user } = await sb.from('remaju_users').select('id').eq('telegram_id', ctx.from.id).single()
+      if (!user) return
 
-    const { data: f } = await sb.from('remaju_filters').select('property_types').eq('user_id', user.id).single()
-    let types = f?.property_types || ['casa','departamento','terreno','local','otro']
+      const { data: f } = await sb.from('remaju_filters').select('property_types').eq('user_id', user.id).single()
+      let types = f?.property_types || ['casa','departamento','terreno','local','otro']
 
-    if (types.includes(tipo)) {
-      if (types.length === 1) return ctx.answerCbQuery('Debes tener al menos un tipo activo')
-      types = types.filter(t => t !== tipo)
-    } else {
-      types = [...types, tipo]
+      if (types.includes(tipo)) {
+        if (types.length === 1) return
+        types = types.filter(t => t !== tipo)
+      } else {
+        types = [...types, tipo]
+      }
+
+      await sb.from('remaju_filters').upsert({ user_id: user.id, property_types: types }, { onConflict: 'user_id' })
+
+      const options = [
+        { key: 'casa',         label: '🏠 Casa' },
+        { key: 'departamento', label: '🏢 Departamento' },
+        { key: 'terreno',      label: '🌿 Terreno' },
+        { key: 'local',        label: '🏪 Local / Oficina' },
+        { key: 'otro',         label: '🏗️ Otro' }
+      ]
+      const buttons = options.map(o => [
+        Markup.button.callback(
+          (types.includes(o.key) ? '✅ ' : '☐ ') + o.label,
+          `tipo:${o.key}`
+        )
+      ])
+      buttons.push([Markup.button.callback('« Volver', 'filt:menu')])
+      await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(buttons).reply_markup)
+    } catch (err) {
+      if (!err.message?.includes('message is not modified')) {
+        logger.error('Error en filtro tipo', { error: err.message })
+      }
     }
-
-    await sb.from('remaju_filters').upsert({ user_id: user.id, property_types: types }, { onConflict: 'user_id' })
-    await ctx.answerCbQuery(types.includes(tipo) ? `✅ ${tipo} activado` : `${tipo} desactivado`)
-
-    // Redibujar el menú de tipos
-    const options = [
-      { key: 'casa',         label: '🏠 Casa' },
-      { key: 'departamento', label: '🏢 Departamento' },
-      { key: 'terreno',      label: '🌿 Terreno' },
-      { key: 'local',        label: '🏪 Local / Oficina' },
-      { key: 'otro',         label: '🏗️ Otro' }
-    ]
-    const buttons = options.map(o => [
-      Markup.button.callback(
-        (types.includes(o.key) ? '✅ ' : '☐ ') + o.label,
-        `tipo:${o.key}`
-      )
-    ])
-    buttons.push([Markup.button.callback('« Volver', 'filt:menu')])
-
-    await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(buttons).reply_markup)
   })
 
   // TIERS
@@ -427,35 +431,41 @@ function createBot () {
   })
 
   bot.action(/^tier:(.+)$/, async (ctx) => {
-    const tier = ctx.match[1]
-    const sb   = getSupabase()
-    const { data: user } = await sb.from('remaju_users').select('id').eq('telegram_id', ctx.from.id).single()
-    if (!user) return ctx.answerCbQuery('No registrado')
-
-    const { data: f } = await sb.from('remaju_filters').select('tiers').eq('user_id', user.id).single()
-    let tiers = f?.tiers || ['super_ganga','muy_bueno','bueno','aceptable']
-
-    if (tiers.includes(tier)) {
-      if (tiers.length === 1) return ctx.answerCbQuery('Debes tener al menos un tier activo')
-      tiers = tiers.filter(t => t !== tier)
-    } else {
-      tiers = [...tiers, tier]
-    }
-
-    await sb.from('remaju_filters').upsert({ user_id: user.id, tiers }, { onConflict: 'user_id' })
     await ctx.answerCbQuery()
+    const tier = ctx.match[1]
+    try {
+      const sb   = getSupabase()
+      const { data: user } = await sb.from('remaju_users').select('id').eq('telegram_id', ctx.from.id).single()
+      if (!user) return
 
-    const options = [
-      { key: 'super_ganga', label: '🔴 Super Ganga  (< $40k)' },
-      { key: 'muy_bueno',   label: '🟠 Muy Bueno   ($40–60k)' },
-      { key: 'bueno',       label: '🟡 Bueno        ($60–75k)' },
-      { key: 'aceptable',   label: '🟢 Aceptable    ($75–90k)' }
-    ]
-    const buttons = options.map(o => [
-      Markup.button.callback((tiers.includes(o.key) ? '✅ ' : '☐ ') + o.label, `tier:${o.key}`)
-    ])
-    buttons.push([Markup.button.callback('« Volver', 'filt:menu')])
-    await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(buttons).reply_markup)
+      const { data: f } = await sb.from('remaju_filters').select('tiers').eq('user_id', user.id).single()
+      let tiers = f?.tiers || ['super_ganga','muy_bueno','bueno','aceptable']
+
+      if (tiers.includes(tier)) {
+        if (tiers.length === 1) return
+        tiers = tiers.filter(t => t !== tier)
+      } else {
+        tiers = [...tiers, tier]
+      }
+
+      await sb.from('remaju_filters').upsert({ user_id: user.id, tiers }, { onConflict: 'user_id' })
+
+      const options = [
+        { key: 'super_ganga', label: '🔴 Super Ganga  (< $40k)' },
+        { key: 'muy_bueno',   label: '🟠 Muy Bueno   ($40–60k)' },
+        { key: 'bueno',       label: '🟡 Bueno        ($60–75k)' },
+        { key: 'aceptable',   label: '🟢 Aceptable    ($75–90k)' }
+      ]
+      const buttons = options.map(o => [
+        Markup.button.callback((tiers.includes(o.key) ? '✅ ' : '☐ ') + o.label, `tier:${o.key}`)
+      ])
+      buttons.push([Markup.button.callback('« Volver', 'filt:menu')])
+      await ctx.editMessageReplyMarkup(Markup.inlineKeyboard(buttons).reply_markup)
+    } catch (err) {
+      if (!err.message?.includes('message is not modified')) {
+        logger.error('Error en filtro tier', { error: err.message })
+      }
+    }
   })
 
   // DISTRITOS
@@ -498,27 +508,31 @@ function createBot () {
   }
 
   bot.action(/^dist:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery()
     const distrito = ctx.match[1]
-    const sb       = getSupabase()
-    const { data: user } = await sb.from('remaju_users').select('id').eq('telegram_id', ctx.from.id).single()
-    if (!user) return ctx.answerCbQuery('No registrado')
+    try {
+      const sb = getSupabase()
+      const { data: user } = await sb.from('remaju_users').select('id').eq('telegram_id', ctx.from.id).single()
+      if (!user) return
 
-    const { data: f } = await sb.from('remaju_filters').select('districts').eq('user_id', user.id).single()
-    let districts = f?.districts || []
+      const { data: f } = await sb.from('remaju_filters').select('districts').eq('user_id', user.id).single()
+      let districts = f?.districts || []
 
-    if (distrito === 'todos') {
-      districts = []
-      await ctx.answerCbQuery('Todos los distritos de Lima activos')
-    } else if (districts.includes(distrito)) {
-      districts = districts.filter(d => d !== distrito)
-      await ctx.answerCbQuery(`${distrito} desactivado`)
-    } else {
-      districts = [...districts, distrito]
-      await ctx.answerCbQuery(`✅ ${distrito} activado`)
+      if (distrito === 'todos') {
+        districts = []
+      } else if (districts.includes(distrito)) {
+        districts = districts.filter(d => d !== distrito)
+      } else {
+        districts = [...districts, distrito]
+      }
+
+      await sb.from('remaju_filters').upsert({ user_id: user.id, districts }, { onConflict: 'user_id' })
+      await ctx.editMessageReplyMarkup(buildDistritoKeyboard(districts).reply_markup)
+    } catch (err) {
+      if (!err.message?.includes('message is not modified')) {
+        logger.error('Error en filtro distrito', { error: err.message })
+      }
     }
-
-    await sb.from('remaju_filters').upsert({ user_id: user.id, districts }, { onConflict: 'user_id' })
-    await ctx.editMessageReplyMarkup(buildDistritoKeyboard(districts).reply_markup)
   })
 
   // MENÚ PRINCIPAL (volver)
