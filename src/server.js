@@ -1,0 +1,290 @@
+require('dotenv').config()
+
+const express        = require('express')
+const { v4: uuidv4 } = require('uuid')
+const RemajuScraper  = require('./scrapers/remaju/index')
+const { getExchangeRate, convertToUsd } = require('./processors/currency')
+const { determineTier } = require('./processors/normalizer')
+const { getDb }      = require('./database/init')
+const { closeBrowser } = require('./browser/manager')
+const logger         = require('./utils/logger')
+const { createBot }  = require('./bot/index')
+
+const app  = express()
+const PORT = process.env.PORT || 3001
+
+app.use(express.json())
+
+// ── Estado del scraper ─────────────────────────────────
+let isRunning = false
+let lastRun   = null
+
+// ── GET /health ────────────────────────────────────────
+app.get('/health', async (req, res) => {
+  const scraper = new RemajuScraper()
+  const browserOk = await scraper.checkHealth()
+  res.json({
+    status:      'ok',
+    browser:     browserOk ? 'ready' : 'not_started',
+    is_running:  isRunning,
+    last_run:    lastRun,
+    uptime_ms:   process.uptime() * 1000
+  })
+})
+
+// ── POST /scrape ───────────────────────────────────────
+app.post('/scrape', async (req, res) => {
+  if (isRunning) {
+    return res.status(429).json({ error: 'Scraping ya en progreso', is_running: true })
+  }
+
+  const {
+    source    = 'remaju',
+    filters   = {},
+    mode      = 'delta'   // 'full' | 'delta'
+  } = req.body || {}
+
+  const runId = uuidv4()
+  isRunning   = true
+
+  // Responder inmediatamente con el run_id para no bloquear n8n
+  res.json({ success: true, run_id: runId, message: 'Scraping iniciado', mode })
+
+  // Ejecutar en background
+  runScraping(runId, source, filters, mode).catch(err => {
+    logger.error('Error fatal en scraping', { runId, error: err.message })
+  })
+})
+
+// ── GET /results/:runId ────────────────────────────────
+// n8n puede hacer polling aquí mientras espera
+app.get('/results/:runId', (req, res) => {
+  try {
+    const db  = getDb()
+    const run = db.prepare('SELECT * FROM scraping_runs WHERE id = ?').get(req.params.runId)
+    db.close()
+
+    if (!run) return res.status(404).json({ error: 'Run no encontrado' })
+
+    if (run.status === 'running') {
+      return res.json({ status: 'running', run_id: req.params.runId })
+    }
+
+    // Run completado — devolver los nuevos registros
+    const db2  = getDb()
+    const rows = db2.prepare(
+      `SELECT * FROM auctions WHERE created_at >= ? AND source = ? ORDER BY price_usd ASC`
+    ).all(run.started_at, run.source || 'remaju')
+    db2.close()
+
+    res.json({ status: run.status, run_id: req.params.runId, run, data: rows })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── GET /auctions ──────────────────────────────────────
+app.get('/auctions', (req, res) => {
+  try {
+    const {
+      max_price_usd = 90000,
+      department    = 'LIMA',
+      alerted       = null,
+      limit         = 50
+    } = req.query
+
+    const db = getDb()
+    let query  = 'SELECT * FROM auctions WHERE status = "active" AND price_usd IS NOT NULL AND price_usd <= ?'
+    const args = [parseFloat(max_price_usd)]
+
+    if (department) { query += ' AND location_department = ?'; args.push(department) }
+    if (alerted !== null) { query += ' AND alerted = ?'; args.push(parseInt(alerted)) }
+    query += ' ORDER BY price_usd ASC LIMIT ?'
+    args.push(parseInt(limit))
+
+    const rows = db.prepare(query).all(...args)
+    db.close()
+    res.json({ count: rows.length, data: rows })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── Función principal de scraping ─────────────────────
+async function runScraping (runId, source, filters, mode) {
+  const startedAt = new Date().toISOString()
+  const db        = getDb()
+
+  // Registrar inicio del run
+  db.prepare(`
+    INSERT INTO scraping_runs (id, source, mode, started_at, status)
+    VALUES (?, ?, ?, ?, 'running')
+  `).run(runId, source, mode, startedAt)
+  db.close()
+
+  try {
+    // 1. Obtener tipo de cambio del día
+    const rateData = await getExchangeRate()
+    logger.info('Tipo de cambio obtenido', rateData)
+
+    // Guardar en DB para historial
+    const db2 = getDb()
+    const today = new Date().toISOString().split('T')[0]
+    db2.prepare(`
+      INSERT OR REPLACE INTO exchange_rates (id, date, usd_to_pen, pen_to_usd, source)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(uuidv4(), today, rateData.usd_to_pen, rateData.pen_to_usd, rateData.source)
+    db2.close()
+
+    // 2. Obtener IDs ya conocidos (para modo delta)
+    const db3  = getDb()
+    const known = db3.prepare('SELECT external_id FROM auctions WHERE source = ?').all(source)
+    const knownIds = new Set(known.map(r => r.external_id))
+    db3.close()
+
+    logger.info('IDs conocidos cargados', { count: knownIds.size, mode })
+
+    // 3. Ejecutar scraper
+    const scraper  = new RemajuScraper()
+    const result   = await scraper.scrape(
+      { ...filters, deltaMode: mode === 'delta' },
+      knownIds
+    )
+
+    // 4. Convertir precios a USD y filtrar
+    let newCount     = 0
+    let updatedCount = 0
+    let qualifying   = 0
+    const MAX_PRICE  = filters.max_price_usd || 90000
+
+    const db4 = getDb()
+
+    for (const record of result.data) {
+      // Completar conversión de moneda
+      if (record.currency_original === 'PEN' && record.price_usd === null) {
+        record.price_usd = convertToUsd(record.price_original, rateData.usd_to_pen)
+      }
+      record.exchange_rate  = rateData.usd_to_pen
+      record.price_usd_tier = record.price_usd ? determineTier(record.price_usd) : null
+
+      // Solo guardar propiedades de Lima
+      if (record.location_department && !record.location_department.includes('LIMA') &&
+          !record.location_department.includes('CALLAO')) continue
+
+      // Guardar en DB
+      const existing = db4.prepare('SELECT id, price_usd FROM auctions WHERE id = ?').get(record.id)
+
+      if (!existing) {
+        db4.prepare(`
+          INSERT OR IGNORE INTO auctions (
+            id, source, external_id, expediente, juzgado, title, description,
+            property_type, property_type_raw, location_department, location_province,
+            location_district, location_raw, area_m2,
+            price_original, currency_original, exchange_rate, price_usd, price_usd_tier,
+            auction_phase, auction_date, detail_url, images, raw_data, price_history,
+            first_seen_at, last_seen_at, status, alerted, alert_count
+          ) VALUES (
+            @id, @source, @external_id, @expediente, @juzgado, @title, @description,
+            @property_type, @property_type_raw, @location_department, @location_province,
+            @location_district, @location_raw, @area_m2,
+            @price_original, @currency_original, @exchange_rate, @price_usd, @price_usd_tier,
+            @auction_phase, @auction_date, @detail_url, @images, @raw_data, @price_history,
+            @first_seen_at, @last_seen_at, @status, @alerted, @alert_count
+          )
+        `).run(record)
+        newCount++
+        if (record.price_usd && record.price_usd <= MAX_PRICE) qualifying++
+      } else {
+        // Actualizar last_seen y precio si cambió
+        if (Math.abs((existing.price_usd || 0) - (record.price_usd || 0)) > 100) {
+          const history = JSON.parse(
+            db4.prepare('SELECT price_history FROM auctions WHERE id = ?').get(record.id)?.price_history || '[]'
+          )
+          history.push({ price_usd: existing.price_usd, date: new Date().toISOString() })
+
+          db4.prepare(`
+            UPDATE auctions SET
+              price_usd = ?, exchange_rate = ?, price_usd_tier = ?,
+              last_seen_at = ?, price_history = ?, updated_at = datetime('now')
+            WHERE id = ?
+          `).run(record.price_usd, rateData.usd_to_pen, record.price_usd_tier,
+                 new Date().toISOString(), JSON.stringify(history), record.id)
+          updatedCount++
+        } else {
+          db4.prepare(`UPDATE auctions SET last_seen_at = ? WHERE id = ?`)
+            .run(new Date().toISOString(), record.id)
+        }
+      }
+    }
+    db4.close()
+
+    // 5. Cerrar run con éxito
+    const durationMs = Date.now() - new Date(startedAt).getTime()
+    const db5 = getDb()
+    db5.prepare(`
+      UPDATE scraping_runs SET
+        completed_at = ?, pages_scraped = ?, records_found = ?,
+        new_records = ?, updated_records = ?, qualifying = ?,
+        duration_ms = ?, status = 'success'
+      WHERE id = ?
+    `).run(
+      new Date().toISOString(), result.pagesScraped, result.recordsFound,
+      newCount, updatedCount, qualifying, durationMs, runId
+    )
+    db5.close()
+
+    lastRun = { runId, completedAt: new Date().toISOString(), newRecords: newCount, qualifying }
+    logger.info('Run completado', { runId, newCount, updatedCount, qualifying, durationMs })
+
+    // 6. Notificar a n8n si hay callback configurado
+    if (process.env.N8N_CALLBACK_URL && (newCount > 0 || updatedCount > 0)) {
+      await notifyN8n(runId, newCount, qualifying)
+    }
+
+  } catch (err) {
+    logger.error('Error en run de scraping', { runId, error: err.message, stack: err.stack })
+
+    const db6 = getDb()
+    db6.prepare(`
+      UPDATE scraping_runs SET status = 'failed', error_message = ?, completed_at = ?
+      WHERE id = ?
+    `).run(err.message, new Date().toISOString(), runId)
+    db6.close()
+  } finally {
+    isRunning = false
+  }
+}
+
+async function notifyN8n (runId, newRecords, qualifying) {
+  try {
+    const axios = require('axios')
+    await axios.post(process.env.N8N_CALLBACK_URL, { run_id: runId, new_records: newRecords, qualifying }, { timeout: 5000 })
+    logger.info('n8n notificado', { runId, newRecords, qualifying })
+  } catch (err) {
+    logger.warn('Error notificando a n8n', { error: err.message })
+  }
+}
+
+// ── Graceful shutdown ──────────────────────────────────
+process.on('SIGTERM', async () => {
+  logger.info('Cerrando servidor...')
+  await closeBrowser()
+  process.exit(0)
+})
+
+app.listen(PORT, () => {
+  logger.info(`Scraper API corriendo en puerto ${PORT}`)
+})
+
+// ── Bot Telegram SaaS ──────────────────────────────────
+const bot = createBot()
+if (bot) {
+  logger.info('Iniciando bot Telegram SaaS...')
+  bot.launch()
+    .catch(err => logger.error('Error iniciando bot', { error: err.message }))
+
+  process.once('SIGTERM', () => bot.stop('SIGTERM'))
+  process.once('SIGINT',  () => bot.stop('SIGINT'))
+}
+
+module.exports = app
