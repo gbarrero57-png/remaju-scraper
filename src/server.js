@@ -11,9 +11,6 @@ const { closeBrowser } = require('./browser/manager')
 // Inicializar schema al arrancar
 initDb()
 
-// Iniciar proxy bridge si hay proxy configurado
-const { startProxyBridge } = require('./proxy/bridge')
-startProxyBridge().catch(err => console.warn('Proxy bridge error:', err.message))
 const logger         = require('./utils/logger')
 const { createBot }  = require('./bot/index')
 
@@ -21,6 +18,12 @@ const app  = express()
 const PORT = process.env.PORT || 3001
 
 app.use(express.json())
+
+// Iniciar proxy bridge ANTES de aceptar requests
+const { startProxyBridge } = require('./proxy/bridge')
+startProxyBridge()
+  .then(url => url && logger.info('Proxy bridge listo', { url }))
+  .catch(err => logger.warn('Proxy bridge error', { error: err.message }))
 
 // ── Estado del scraper ─────────────────────────────────
 let isRunning = false
@@ -154,6 +157,22 @@ app.get('/proxy-test', async (req, res) => {
   }
 
   res.json(results)
+})
+
+// ── GET /bridge-test ───────────────────────────────────
+app.get('/bridge-test', async (req, res) => {
+  const axios = require('axios')
+  const bridgePort = parseInt(process.env.PROXY_BRIDGE_PORT) || 8877
+  const bridgeUrl = `http://localhost:${bridgePort}`
+  try {
+    const r = await axios.get('https://api.ipify.org/?format=json', {
+      proxy: { host: 'localhost', port: bridgePort },
+      timeout: 12000
+    })
+    res.json({ ok: true, bridge_url: bridgeUrl, ip: r.data.ip })
+  } catch (e) {
+    res.json({ ok: false, bridge_url: bridgeUrl, error: e.message })
+  }
 })
 
 // ── GET /diagnose ──────────────────────────────────────
