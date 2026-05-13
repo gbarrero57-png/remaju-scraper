@@ -119,10 +119,7 @@ app.get('/diagnose', async (req, res) => {
   let browser, context, page
   try {
     browser = await getBrowser()
-    context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      viewport: { width: 1366, height: 768 }, locale: 'es-PE'
-    })
+    context = await newContext(browser)
     page = await context.newPage()
     await page.goto('https://remaju.pj.gob.pe/remaju/pages/publico/remateExterno.xhtml', { waitUntil: 'domcontentloaded', timeout: 30000 })
     await page.waitForTimeout(3000)
