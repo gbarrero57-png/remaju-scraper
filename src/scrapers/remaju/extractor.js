@@ -74,10 +74,16 @@ async function extractPage (page) {
 // Detecta si hay página siguiente disponible
 async function hasNextPage (page) {
   return page.evaluate(() => {
-    const nextBtn = document.querySelector(
-      '[id*="listaRemate"] .ui-paginator-next:not(.ui-state-disabled)'
-    )
-    return !!nextBtn
+    const SELECTORS = [
+      '[id*="listaRemate"] .ui-paginator-next:not(.ui-state-disabled)',
+      '.ui-paginator-next:not(.ui-state-disabled)',
+      '.ui-paginator-next[aria-disabled="false"]',
+      '.ui-paginator-next:not([aria-disabled="true"])'
+    ]
+    for (const sel of SELECTORS) {
+      if (document.querySelector(sel)) return true
+    }
+    return false
   })
 }
 

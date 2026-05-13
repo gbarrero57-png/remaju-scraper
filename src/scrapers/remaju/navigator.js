@@ -66,7 +66,12 @@ async function navigateAndScrape (page, filters = {}, knownIds = new Set()) {
       break
     }
 
-    await goToNextPage(page)
+    try {
+      await goToNextPage(page)
+    } catch (err) {
+      logger.warn('Error navegando a siguiente página, terminando paginación', { error: err.message })
+      break
+    }
     await humanDelay(2500, 4000)
     currentPage++
   }
@@ -91,11 +96,21 @@ async function setPageSize (page, size) {
 
 async function goToNextPage (page) {
   await withRetry(async () => {
-    const nextBtn = await page.$(
-      '[id*="listaRemate"] .ui-paginator-next:not(.ui-state-disabled)'
-    )
-    if (!nextBtn) throw new Error('Botón siguiente no encontrado')
-    await nextBtn.click()
+    // Use page.evaluate click — same JS engine as hasNextPage, avoids race with page.$()
+    const clicked = await page.evaluate(() => {
+      const SELECTORS = [
+        '[id*="listaRemate"] .ui-paginator-next:not(.ui-state-disabled)',
+        '.ui-paginator-next:not(.ui-state-disabled)',
+        '.ui-paginator-next[aria-disabled="false"]',
+        '.ui-paginator-next:not([aria-disabled="true"])'
+      ]
+      for (const sel of SELECTORS) {
+        const btn = document.querySelector(sel)
+        if (btn) { btn.click(); return true }
+      }
+      return false
+    })
+    if (!clicked) throw new Error('Botón siguiente no encontrado')
     await page.waitForLoadState('networkidle', { timeout: TIMEOUT }).catch(() => {})
     await page.waitForSelector('.ui-datagrid-column', { timeout: TIMEOUT })
   }, { label: 'goToNextPage', attempts: 2 })
