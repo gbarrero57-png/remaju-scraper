@@ -97,7 +97,7 @@ app.get('/auctions', (req, res) => {
     } = req.query
 
     const db = getDb()
-    let query  = 'SELECT * FROM auctions WHERE status = "active" AND price_usd IS NOT NULL AND price_usd <= ?'
+    let query  = "SELECT * FROM auctions WHERE status = 'active' AND price_usd IS NOT NULL AND price_usd <= ?"
     const args = [parseFloat(max_price_usd)]
 
     if (department) { query += ' AND location_department = ?'; args.push(department) }
