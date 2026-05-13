@@ -562,8 +562,8 @@ function createBot () {
   })
 
   // ── Mensaje de texto genérico — guía al usuario ──────────────────────────
-  bot.on('text', async (ctx) => {
-    if (ctx.message.text.startsWith('/')) return
+  bot.on('text', async (ctx, next) => {
+    if (ctx.message.text.startsWith('/')) return next()
 
     // Input personalizado de precio
     if (awaitingInput.get(ctx.from.id) === 'precio') {
