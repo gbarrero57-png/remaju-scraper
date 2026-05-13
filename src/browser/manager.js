@@ -53,12 +53,16 @@ async function newContext (browser) {
     }
   }
 
-  // Proxy via bridge local (HTTP sin auth → SOCKS5 con auth en Webshare)
-  const { getLocalProxyUrl } = require('../proxy/bridge')
-  const proxyUrl = getLocalProxyUrl() || process.env.PROXY_SERVER
-  if (proxyUrl) {
-    ctxOpts.proxy = { server: proxyUrl }
-    logger.info('Proxy configurado', { server: proxyUrl })
+  // Playwright HTTP proxy con autenticación nativa (Webshare Rotating Residential)
+  const proxyUser = process.env.PROXY_USERNAME
+  const proxyPass = process.env.PROXY_PASSWORD
+  if (proxyUser && proxyPass) {
+    ctxOpts.proxy = {
+      server: 'http://p.webshare.io:80',
+      username: proxyUser,
+      password: proxyPass
+    }
+    logger.info('Proxy HTTP configurado', { server: 'http://p.webshare.io:80', user: proxyUser })
   }
 
   return browser.newContext(ctxOpts)
