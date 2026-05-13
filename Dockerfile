@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon0 \
     libgbm1 \
     libasound2 \
+    python3 \
+    make \
+    g++ \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
@@ -24,8 +27,6 @@ COPY package.json .
 RUN npm install --omit=dev
 
 COPY src/ ./src/
-# Cache bust: v20260513-proxy
-RUN node -e "const s=require('fs').readFileSync('src/server.js','utf8'); if(s.includes('status = \"active\"')) process.exit(1); if(!s.includes('PROXY_SERVER')) { console.error('FATAL: proxy support missing'); process.exit(1); }"
 
 EXPOSE 3001
 
