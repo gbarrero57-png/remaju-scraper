@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-ENV PROXY_SERVER=http://p.webshare.io:80
+ENV PROXY_SERVER=http://p.webshare.io:3128
 ENV PROXY_USERNAME=mtjgphlw-PE-1
 ENV PROXY_PASSWORD=es665h4w7cq9
 

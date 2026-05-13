@@ -113,6 +113,38 @@ app.get('/auctions', (req, res) => {
   }
 })
 
+// ── GET /proxy-test ────────────────────────────────────
+app.get('/proxy-test', async (req, res) => {
+  const axios = require('axios')
+  const results = {}
+
+  const proxyServer = process.env.PROXY_SERVER
+  const user = process.env.PROXY_USERNAME
+  const pass = process.env.PROXY_PASSWORD
+
+  results.env = { server: proxyServer || 'NOT SET', user: user || 'NOT SET' }
+
+  // Test directo (sin proxy)
+  try {
+    const r = await axios.get('https://api.ipify.org/?format=json', { timeout: 8000 })
+    results.direct_ip = r.data.ip
+  } catch (e) { results.direct_error = e.message }
+
+  // Test con proxy via axios
+  if (proxyServer) {
+    try {
+      const url = new URL(proxyServer)
+      const r = await axios.get('https://api.ipify.org/?format=json', {
+        timeout: 10000,
+        proxy: { host: url.hostname, port: parseInt(url.port), auth: { username: user, password: pass } }
+      })
+      results.proxy_ip = r.data.ip
+    } catch (e) { results.proxy_error = e.message }
+  }
+
+  res.json(results)
+})
+
 // ── GET /diagnose ──────────────────────────────────────
 app.get('/diagnose', async (req, res) => {
   const { getBrowser, newContext } = require('./browser/manager')
