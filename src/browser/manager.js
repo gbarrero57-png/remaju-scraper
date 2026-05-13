@@ -40,7 +40,7 @@ async function getBrowser () {
 }
 
 async function newContext (browser) {
-  return browser.newContext({
+  const ctxOpts = {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     viewport: { width: 1366, height: 768 },
     locale: 'es-PE',
@@ -51,7 +51,19 @@ async function newContext (browser) {
       'Cache-Control': 'max-age=0',
       'Connection': 'keep-alive'
     }
-  })
+  }
+
+  // Proxy residencial (Webshare.io u otro) — evita bloqueo Cloudflare en datacenter
+  if (process.env.PROXY_SERVER) {
+    ctxOpts.proxy = { server: process.env.PROXY_SERVER }
+    if (process.env.PROXY_USERNAME) {
+      ctxOpts.proxy.username = process.env.PROXY_USERNAME
+      ctxOpts.proxy.password = process.env.PROXY_PASSWORD || ''
+    }
+    logger.info('Proxy configurado', { server: process.env.PROXY_SERVER })
+  }
+
+  return browser.newContext(ctxOpts)
 }
 
 async function closeBrowser () {
