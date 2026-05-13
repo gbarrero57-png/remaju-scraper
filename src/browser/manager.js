@@ -56,10 +56,6 @@ async function newContext (browser) {
   // Proxy residencial (Webshare.io u otro) — evita bloqueo Cloudflare en datacenter
   if (process.env.PROXY_SERVER) {
     ctxOpts.proxy = { server: process.env.PROXY_SERVER }
-    if (process.env.PROXY_USERNAME) {
-      ctxOpts.proxy.username = process.env.PROXY_USERNAME
-      ctxOpts.proxy.password = process.env.PROXY_PASSWORD || ''
-    }
     logger.info('Proxy configurado', { server: process.env.PROXY_SERVER })
   }
 
