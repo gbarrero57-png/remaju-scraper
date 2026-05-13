@@ -14,7 +14,7 @@
     "@supabase/supabase-js": "^2.105.4",
     "better-sqlite3": "^9.6.0",
     "proxy-chain": "^2.5.9",
-    "socks": "^5.0.1",
+    "socks": "^2.8.3",
     "socks-proxy-agent": "^8.0.4",
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
