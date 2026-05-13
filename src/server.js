@@ -229,6 +229,44 @@ app.get('/diagnose', async (req, res) => {
   }
 })
 
+// ── GET /diagnose-direct ───────────────────────────────
+// Igual que /diagnose pero SIN proxy (conexión directa desde VPS)
+app.get('/diagnose-direct', async (req, res) => {
+  const { getBrowser } = require('./browser/manager')
+  const { chromium } = require('playwright-extra')
+  let browser, context, page
+  try {
+    browser = await getBrowser()
+    // Contexto sin proxy
+    context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      viewport: { width: 1366, height: 768 },
+      locale: 'es-PE',
+      timezoneId: 'America/Lima'
+    })
+    page = await context.newPage()
+
+    await page.goto('https://api.ipify.org/?format=json', { waitUntil: 'domcontentloaded', timeout: 10000 })
+    const outboundIp = JSON.parse(await page.evaluate(() => document.body.innerText)).ip
+
+    await page.goto('https://remaju.pj.gob.pe/remaju/pages/publico/remateExterno.xhtml', { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await page.waitForTimeout(2000)
+    const info = await page.evaluate(() => ({
+      title:         document.title,
+      url:           location.href,
+      status:        document.querySelector('.error-code')?.innerText || 'no-error',
+      bodySnippet:   document.body.innerText?.substring(0, 300),
+      datagridCount: document.querySelectorAll('.ui-datagrid-column').length,
+      selectCount:   document.querySelectorAll('select').length
+    }))
+    await context.close()
+    res.json({ ok: true, outbound_ip: outboundIp, proxy: false, ...info })
+  } catch (err) {
+    if (context) await context.close().catch(() => {})
+    res.status(500).json({ ok: false, proxy: false, error: err.message })
+  }
+})
+
 // ── Función principal de scraping ─────────────────────
 async function runScraping (runId, source, filters, mode) {
   const startedAt = new Date().toISOString()
