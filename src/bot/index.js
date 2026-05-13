@@ -593,9 +593,17 @@ function createBot () {
   // COMANDOS DE ADMIN (solo ADMIN_ID)
   // ════════════════════════════════════════════════════════
 
+  // /myid — diagnóstico
+  bot.command('myid', async (ctx) => {
+    await ctx.reply(`Tu Telegram ID: ${ctx.from.id}`)
+  })
+
   // /activar <telegram_id> [dias]
   bot.command('activar', async (ctx) => {
-    if (ctx.from.id !== ADMIN_ID) return
+    if (ctx.from.id !== ADMIN_ID) {
+      await ctx.reply(`⛔ No autorizado. Tu ID: ${ctx.from.id} | Admin esperado: ${ADMIN_ID}`)
+      return
+    }
 
     const args      = ctx.message.text.trim().split(/\s+/)
     const targetId  = parseInt(args[1])
