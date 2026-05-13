@@ -21,10 +21,14 @@ async function getBrowser () {
   if (_browser && _browser.isConnected()) return _browser
 
   logger.info('Iniciando browser Chromium con stealth...')
-  _browser = await chromium.launch({
+  const launchOpts = {
     headless: process.env.BROWSER_HEADLESS !== 'false',
     args: BROWSER_ARGS
-  })
+  }
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+    launchOpts.executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+  }
+  _browser = await chromium.launch(launchOpts)
 
   _browser.on('disconnected', () => {
     logger.warn('Browser desconectado')
