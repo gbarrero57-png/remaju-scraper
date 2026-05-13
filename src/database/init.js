@@ -5,7 +5,7 @@ const fs   = require('fs')
 const path = require('path')
 
 const DB_PATH     = process.env.DB_PATH || path.join(__dirname, '../../../data/remaju.db')
-const SCHEMA_PATH = path.join(__dirname, '../../../database/schema.sql')
+const SCHEMA_PATH = path.join(__dirname, 'schema.sql')
 
 function initDb () {
   const dir = path.dirname(DB_PATH)

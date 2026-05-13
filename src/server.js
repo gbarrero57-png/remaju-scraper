@@ -5,8 +5,11 @@ const { v4: uuidv4 } = require('uuid')
 const RemajuScraper  = require('./scrapers/remaju/index')
 const { getExchangeRate, convertToUsd } = require('./processors/currency')
 const { determineTier } = require('./processors/normalizer')
-const { getDb }      = require('./database/init')
+const { getDb, initDb } = require('./database/init')
 const { closeBrowser } = require('./browser/manager')
+
+// Inicializar schema al arrancar
+initDb()
 const logger         = require('./utils/logger')
 const { createBot }  = require('./bot/index')
 
