@@ -5,12 +5,10 @@ const logger = require('../utils/logger')
 const BOT_TOKEN   = process.env.ADMIN_TELEGRAM_TOKEN
 const ADMIN_ID    = parseInt(process.env.ADMIN_TELEGRAM_CHAT_ID)
 
-const PRICE_SOLES    = process.env.PAYMENT_PRICE_SOLES    || '70'
-const PRICE_SOLES_MP = process.env.PAYMENT_PRICE_SOLES_MP || '74'
-const YAPE_NUM       = process.env.PAYMENT_YAPE           || '—'
-const PLIN_NUM       = process.env.PAYMENT_PLIN           || '—'
-const MP_LINK        = process.env.PAYMENT_MP_LINK        || '—'
-const ADMIN_NAME     = process.env.PAYMENT_ADMIN_NAME     || 'Gabriel Barrero'
+const PRICE_SOLES = process.env.PAYMENT_PRICE_SOLES  || '70'
+const YAPE_NUM    = process.env.PAYMENT_YAPE          || '—'
+const PLIN_NUM    = process.env.PAYMENT_PLIN          || '—'
+const ADMIN_NAME  = process.env.PAYMENT_ADMIN_NAME    || 'Gabriel Barrero'
 
 let supabase = null
 
@@ -202,9 +200,7 @@ function createBot () {
       `<b>Cómo pagar:</b>\n\n` +
       `📱 <b>Yape:</b> ${YAPE_NUM}\n` +
       `📱 <b>Plin:</b> ${PLIN_NUM}\n` +
-      `   A nombre de: ${ADMIN_NAME}\n\n` +
-      `💳 <b>MercadoPago (tarjeta):</b> S/ ${PRICE_SOLES_MP}\n` +
-      `   ${MP_LINK}\n\n` +
+      `   A nombre de: <b>${ADMIN_NAME}</b>\n\n` +
       `━━━━━━━━━━━━━━━━━━\n` +
       `<i>Después de pagar, envía aquí tu captura de pantalla del comprobante. Te activamos en menos de 24h.</i>`
     )
