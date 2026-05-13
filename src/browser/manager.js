@@ -53,12 +53,13 @@ async function newContext (browser) {
     }
   }
 
-  // Proxy via bridge local en :8877 (HTTP sin auth → SOCKS5 Webshare con auth)
-  // El bridge arranca en server.js antes de aceptar requests
-  const bridgePort = parseInt(process.env.PROXY_BRIDGE_PORT) || 8877
-  if (process.env.PROXY_USERNAME) {
-    ctxOpts.proxy = { server: `http://localhost:${bridgePort}` }
-    logger.info('Proxy bridge configurado', { server: `http://localhost:${bridgePort}` })
+  // HTTP proxy con auth nativa (iproyal.com residential)
+  const proxyServer = process.env.PROXY_SERVER
+  const proxyUser   = process.env.PROXY_USERNAME
+  const proxyPass   = process.env.PROXY_PASSWORD
+  if (proxyServer && proxyUser) {
+    ctxOpts.proxy = { server: proxyServer, username: proxyUser, password: proxyPass }
+    logger.info('Proxy configurado', { server: proxyServer })
   }
 
   return browser.newContext(ctxOpts)
