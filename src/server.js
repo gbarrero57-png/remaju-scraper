@@ -121,6 +121,11 @@ app.get('/diagnose', async (req, res) => {
     browser = await getBrowser()
     context = await newContext(browser)
     page = await context.newPage()
+    // Verificar IP real que ve el exterior
+    await page.goto('https://api.ipify.org/?format=json', { waitUntil: 'domcontentloaded', timeout: 15000 })
+    const ipData = await page.evaluate(() => document.body.innerText)
+    const outboundIp = JSON.parse(ipData).ip
+
     await page.goto('https://remaju.pj.gob.pe/remaju/pages/publico/remateExterno.xhtml', { waitUntil: 'domcontentloaded', timeout: 30000 })
     await page.waitForTimeout(3000)
     const info = await page.evaluate(() => ({
@@ -130,10 +135,9 @@ app.get('/diagnose', async (req, res) => {
       datagridCount: document.querySelectorAll('.ui-datagrid-column').length,
       formCount: document.querySelectorAll('form').length,
       selectCount: document.querySelectorAll('select').length,
-      allClasses: [...new Set(Array.from(document.querySelectorAll('[class]')).flatMap(el => el.className.split(' ')).filter(Boolean))].slice(0, 30)
     }))
     await context.close()
-    res.json({ ok: true, ...info })
+    res.json({ ok: true, outbound_ip: outboundIp, proxy_configured: !!process.env.PROXY_SERVER, ...info })
   } catch (err) {
     if (context) await context.close().catch(() => {})
     res.status(500).json({ ok: false, error: err.message })
