@@ -175,6 +175,29 @@ app.get('/bridge-test', async (req, res) => {
   }
 })
 
+// ── GET /socks-test ───────────────────────────────────
+app.get('/socks-test', async (req, res) => {
+  const { testSocksConnect } = require('./proxy/bridge')
+  const results = {}
+
+  const targets = [
+    { key: 'ipify',  host: 'api.ipify.org',           port: 443 },
+    { key: 'remaju', host: 'remaju.pj.gob.pe',         port: 443 },
+    { key: 'remaju_80', host: 'remaju.pj.gob.pe',      port: 80  }
+  ]
+
+  for (const t of targets) {
+    try {
+      await testSocksConnect(t.host, t.port)
+      results[t.key] = 'ok'
+    } catch (e) {
+      results[t.key + '_error'] = e.message
+    }
+  }
+
+  res.json(results)
+})
+
 // ── GET /diagnose ──────────────────────────────────────
 app.get('/diagnose', async (req, res) => {
   const { getBrowser, newContext } = require('./browser/manager')
