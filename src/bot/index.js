@@ -607,6 +607,46 @@ function createBot () {
   // COMANDOS DE ADMIN (solo ADMIN_ID)
   // ════════════════════════════════════════════════════════
 
+  // ── Callback: reactivar usuario desde notificación de vencimiento ──────────
+  bot.action(/^reactivar:(\d+)$/, async (ctx) => {
+    if (ctx.from.id !== ADMIN_ID) {
+      return ctx.answerCbQuery('⛔ No autorizado')
+    }
+    await ctx.answerCbQuery('Activando...')
+
+    const targetTelegramId = parseInt(ctx.match[1])
+    const sb   = getSupabase()
+    const ends = new Date()
+    ends.setDate(ends.getDate() + 30)
+
+    const { data: user, error } = await sb
+      .from('remaju_users')
+      .update({ subscription_status: 'active', subscription_ends_at: ends.toISOString(), active: true })
+      .eq('telegram_id', targetTelegramId)
+      .select()
+      .single()
+
+    if (error || !user) {
+      return ctx.editMessageText('❌ Usuario no encontrado.', { parse_mode: 'HTML' })
+    }
+
+    await bot.telegram.sendMessage(
+      targetTelegramId,
+      `🎉 <b>¡Tu suscripción está activa!</b>\n\n` +
+      `✅ Acceso completo por <b>30 días</b>\n` +
+      `📅 Vence: ${ends.toLocaleDateString('es-PE')}\n\n` +
+      `Recibirás alertas cada mañana con los mejores remates de Lima.\n` +
+      `Usa /filtros para personalizar tus preferencias.`,
+      { parse_mode: 'HTML' }
+    ).catch(() => {})
+
+    await ctx.editMessageText(
+      `✅ <b>${user.first_name} reactivado</b>\n` +
+      `📅 Vence: ${ends.toLocaleDateString('es-PE')} (30 días)`,
+      { parse_mode: 'HTML' }
+    )
+  })
+
   // /myid — diagnóstico
   bot.command('myid', async (ctx) => {
     await ctx.reply(`Tu Telegram ID: ${ctx.from.id}`)
