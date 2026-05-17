@@ -41,9 +41,11 @@ function detectLimaDistrict (text) {
 }
 
 function isLimaProperty (record) {
-  const text = [record.description, record.location_raw, record.raw_text].join(' ').toUpperCase()
-  if (text.includes('LIMA')) return true
-  return LIMA_DISTRICTS.some(d => text.includes(d))
+  // Only use location_raw — descriptions mention "Lima" for legal references (Zona Registral, SUNARP)
+  // which causes false positives for properties physically outside Lima
+  const locRaw = (record.location_raw || '').toUpperCase()
+  if (locRaw.includes('LIMA') || locRaw.includes('CALLAO')) return true
+  return LIMA_DISTRICTS.some(d => locRaw.includes(d))
 }
 
 function extractAreaM2 (text) {
