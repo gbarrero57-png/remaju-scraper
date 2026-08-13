@@ -28,40 +28,45 @@ function getSupabase () {
   return supabase
 }
 
-async function getOrCreateUser (telegramUser) {
+// Busca un usuario existente por telegram_id — YA NO auto-crea cuentas.
+// La cuenta se crea en la web (registro abierto); Telegram solo se conecta
+// a una cuenta que ya existe, vía el flujo de /start <token>.
+async function getUserByTelegramId (telegramId) {
   const sb = getSupabase()
-  const { id, username, first_name, last_name } = telegramUser
+  const { data } = await sb.from('remaju_users').select('*').eq('telegram_id', telegramId).single()
+  return data || null
+}
 
-  const { data: existing } = await sb
-    .from('remaju_users')
-    .select('*')
-    .eq('telegram_id', id)
+// Vincula un telegram_id a una cuenta web existente usando el token de un
+// solo uso generado desde el dashboard (POST /api/telegram/connect).
+async function connectTelegramWithToken (rawToken, telegramUser) {
+  const sb = getSupabase()
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
+
+  const { data: tokenRow } = await sb
+    .from('remaju_web_tokens')
+    .select('id, user_id, expires_at, used_at, purpose')
+    .eq('token_hash', tokenHash)
+    .eq('purpose', 'connect_telegram')
     .single()
 
-  if (existing) return { user: existing, isNew: false }
+  if (!tokenRow || tokenRow.used_at || new Date(tokenRow.expires_at) < new Date()) {
+    return { ok: false, reason: 'invalid' }
+  }
 
-  const trialEnds = new Date()
-  trialEnds.setDate(trialEnds.getDate() + 3)
-
-  const { data: newUser, error } = await sb
+  const { id, username, first_name, last_name } = telegramUser
+  const { data: updated, error } = await sb
     .from('remaju_users')
-    .insert({
-      telegram_id:       id,
-      telegram_username: username || null,
-      first_name:        first_name || 'Usuario',
-      last_name:         last_name  || null,
-      subscription_status: 'trial',
-      trial_ends_at:     trialEnds.toISOString()
-    })
+    .update({ telegram_id: id, telegram_username: username || null, first_name: first_name || 'Usuario', last_name: last_name || null })
+    .eq('id', tokenRow.user_id)
+    .is('telegram_id', null) // no pisar una cuenta que ya tenía Telegram vinculado
     .select()
     .single()
 
-  if (error) throw error
+  if (error || !updated) return { ok: false, reason: 'already_linked' }
 
-  // Crear filtros por defecto
-  await sb.from('remaju_filters').insert({ user_id: newUser.id })
-
-  return { user: newUser, isNew: true }
+  await sb.from('remaju_web_tokens').update({ used_at: new Date().toISOString() }).eq('id', tokenRow.id)
+  return { ok: true, user: updated }
 }
 
 function getStatusEmoji (status, isExpired) {
@@ -116,53 +121,57 @@ function createBot () {
   const bot = new Telegraf(BOT_TOKEN)
 
   // ── /start ───────────────────────────────────────────────────────────────
+  // La cuenta ya no se crea acá — se crea en la web (registro abierto por
+  // email). /start solo hace 2 cosas: (a) si viene con un token de conexión
+  // (link generado desde el dashboard), vincula este Telegram a esa cuenta;
+  // (b) si viene "pelado", saluda y apunta a la web.
   bot.start(async (ctx) => {
     try {
-      const { user, isNew } = await getOrCreateUser(ctx.from)
+      const payload = ctx.startPayload && ctx.startPayload.trim()
 
-      if (isNew) {
+      if (payload) {
+        const result = await connectTelegramWithToken(payload, ctx.from)
+
+        if (!result.ok) {
+          const msg = result.reason === 'already_linked'
+            ? '⚠️ Esa cuenta ya tiene un Telegram conectado, o este Telegram ya está conectado a otra cuenta.'
+            : '⚠️ Ese link ya expiró o no es válido. Genera uno nuevo desde tu panel web.'
+          return ctx.reply(msg)
+        }
+
         await ctx.replyWithHTML(
-          `👋 <b>¡Hola ${user.first_name}!</b>\n\n` +
-          `Cada mañana a las <b>7AM</b> te envío los mejores remates de Lima, ` +
-          `filtrados por tu presupuesto y zona. Sin que tengas que buscar nada.\n\n` +
-          `🔴 Super Ganga · 🟠 Muy Bueno · 🟡 Bueno · 🟢 Aceptable\n\n` +
-          `⏳ <b>3 días de prueba gratis</b> — sin tarjeta.\n\n` +
-          `Para empezar, configura qué propiedades te interesan:`,
-          Markup.inlineKeyboard([
-            [Markup.button.callback('⚙️ Configurar mis filtros', 'ayuda:filtros')],
-            [Markup.button.callback('❓ ¿Cómo funciona?', 'ayuda:inicio')]
-          ])
+          `✅ <b>¡Telegram conectado!</b>\n\n` +
+          `Desde ahora también recibirás aquí tus alertas de remates, además de en la web.\n\n` +
+          `👉 Administra tus filtros y suscripción en <a href="${WEB_DASHBOARD_URL}">${WEB_DASHBOARD_URL}</a>`
         )
 
-        // Notificar al admin
         await bot.telegram.sendMessage(ADMIN_ID,
-          `🆕 <b>Nuevo usuario registrado</b>\n` +
-          `👤 ${user.first_name} (@${user.telegram_username || 'sin_usuario'})\n` +
-          `🆔 ID: <code>${user.telegram_id}</code>`,
+          `🔗 <b>Telegram conectado</b>\n` +
+          `👤 ${result.user.first_name} (@${result.user.telegram_username || 'sin_usuario'})\n` +
+          `🆔 ID: <code>${result.user.telegram_id}</code>`,
           { parse_mode: 'HTML' }
         ).catch(() => {})
-
-      } else {
-        const subLine = formatSubscriptionLine(user)
-        const now = new Date()
-        const endsAt = user.subscription_status === 'active' ? user.subscription_ends_at : user.trial_ends_at
-        const daysLeft = endsAt ? Math.ceil((new Date(endsAt) - now) / 86400000) : null
-        const showRenew = daysLeft !== null && daysLeft <= 5
-
-        const buttons = [
-          [Markup.button.callback('⚙️ Mis filtros', 'filt:menu'), Markup.button.callback('📊 Mi estado', 'ver:estado')]
-        ]
-        if (showRenew) buttons.push([Markup.button.callback('💳 Renovar acceso', 'sub:pago')])
-
-        await ctx.replyWithHTML(
-          `👋 <b>¡Hola de nuevo, ${user.first_name}!</b>\n\n` +
-          `${subLine}`,
-          Markup.inlineKeyboard(buttons)
-        )
+        return
       }
+
+      const existing = await getUserByTelegramId(ctx.from.id)
+
+      if (existing) {
+        const subLine = formatSubscriptionLine(existing)
+        await ctx.replyWithHTML(`👋 <b>¡Hola de nuevo, ${existing.first_name}!</b>\n\n${subLine}`)
+        return
+      }
+
+      await ctx.replyWithHTML(
+        `👋 <b>¡Hola!</b>\n\n` +
+        `REMAJU Monitor te avisa cada mañana con los mejores remates judiciales de Lima, filtrados por tu presupuesto y zona.\n\n` +
+        `Crea tu cuenta y configura tus filtros desde el panel web:\n` +
+        `👉 <a href="${WEB_DASHBOARD_URL}/registro">${WEB_DASHBOARD_URL}/registro</a>\n\n` +
+        `Una vez registrado, desde ahí puedes conectar este Telegram para recibir tus alertas también acá.`
+      )
     } catch (err) {
       logger.error('Error en /start', { error: err.message, telegram_id: ctx.from.id })
-      await ctx.reply('Hubo un error al registrarte. Intenta de nuevo en unos minutos.')
+      await ctx.reply('Hubo un error. Intenta de nuevo en unos minutos.')
     }
   })
 
@@ -226,47 +235,6 @@ function createBot () {
         [Markup.button.callback('📸 Ya pagué — enviar comprobante', 'sub:comprobante')]
       ])
     )
-  })
-
-  // ── /panel — crear/acceder al dashboard web ─────────────────────────────
-  bot.command('panel', async (ctx) => {
-    try {
-      const { user } = await getOrCreateUser(ctx.from)
-      const sb = getSupabase()
-
-      if (user.auth_user_id) {
-        return ctx.replyWithHTML(
-          `🖥️ Ya tienes una cuenta web creada.\n\n` +
-          `👉 Inicia sesión en <a href="${WEB_DASHBOARD_URL}/login">${WEB_DASHBOARD_URL}/login</a>`
-        )
-      }
-
-      // Invalida cualquier link previo sin usar — solo uno activo a la vez
-      await sb.from('remaju_web_tokens')
-        .update({ used_at: new Date().toISOString() })
-        .eq('user_id', user.id)
-        .is('used_at', null)
-
-      const rawToken  = crypto.randomBytes(32).toString('base64url')
-      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
-
-      const { error } = await sb.from('remaju_web_tokens').insert({
-        user_id: user.id, token_hash: tokenHash, expires_at: expiresAt
-      })
-      if (error) throw error
-
-      const link = `${WEB_DASHBOARD_URL}/registro?token=${rawToken}`
-      await ctx.replyWithHTML(
-        `🖥️ <b>Panel web REMAJU Monitor</b>\n\n` +
-        `Crea tu acceso con email y contraseña para ver tus remates desde el navegador, ` +
-        `explorar todo el catálogo y editar tus filtros con mejor comodidad.\n\n` +
-        `Link de un solo uso, expira en 15 minutos:\n👉 <a href="${link}">${link}</a>`
-      )
-    } catch (err) {
-      logger.error('Error en /panel', { error: err.message, telegram_id: ctx.from.id })
-      await ctx.reply('Hubo un error generando tu acceso web. Intenta de nuevo en unos minutos.')
-    }
   })
 
   // ── Recibir comprobante de pago (foto o archivo) ─────────────────────────
@@ -1108,6 +1076,58 @@ function createBot () {
       )
     } catch (err) {
       logger.error('Error en /activar', { error: err.message })
+      await ctx.reply(`Error: ${err.message}`)
+    }
+  })
+
+  // /activar_web <id> [días] — activar una cuenta creada por la web que
+  // pagó vía comprobante subido en el dashboard (no tiene telegram_id
+  // necesariamente, así que no se filtra por eso ni se asume que se le
+  // puede escribir por Telegram).
+  bot.command('activar_web', async (ctx) => {
+    if (ctx.from.id !== ADMIN_ID) {
+      await ctx.reply(`⛔ No autorizado. Tu ID: ${ctx.from.id} | Admin esperado: ${ADMIN_ID}`)
+      return
+    }
+
+    const args     = ctx.message.text.trim().split(/\s+/)
+    const targetId = args[1]
+    const days     = parseInt(args[2]) || 30
+
+    if (!targetId) return ctx.reply('Uso: /activar_web <id> [días]')
+
+    try {
+      const sb  = getSupabase()
+      const ends = new Date()
+      ends.setDate(ends.getDate() + days)
+
+      const { data: user, error } = await sb
+        .from('remaju_users')
+        .update({ subscription_status: 'active', subscription_ends_at: ends.toISOString(), active: true })
+        .eq('id', targetId)
+        .select()
+        .single()
+
+      if (error || !user) return ctx.reply(`❌ Usuario ${targetId} no encontrado`)
+
+      if (user.telegram_id) {
+        await bot.telegram.sendMessage(
+          user.telegram_id,
+          `🎉 <b>¡Tu suscripción está activa!</b>\n\n` +
+          `✅ Acceso completo por <b>${days} días</b>\n` +
+          `📅 Vence: ${ends.toLocaleDateString('es-PE')}\n\n` +
+          `Revisa tus remates en ${WEB_DASHBOARD_URL}`,
+          { parse_mode: 'HTML' }
+        ).catch(() => {})
+      }
+
+      await ctx.replyWithHTML(
+        `✅ <b>Activado (cuenta web)</b>\n` +
+        `👤 ${user.first_name}${user.telegram_id ? ` (Telegram: ${user.telegram_id})` : ' (sin Telegram conectado)'}\n` +
+        `📅 Vence: ${ends.toLocaleDateString('es-PE')} (${days} días)`
+      )
+    } catch (err) {
+      logger.error('Error en /activar_web', { error: err.message })
       await ctx.reply(`Error: ${err.message}`)
     }
   })
